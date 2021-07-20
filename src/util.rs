@@ -1,0 +1,194 @@
+use std::{
+    io::{self, Read, Write},
+    net,
+    sync::{Arc, Condvar, Mutex},
+    time,
+};
+
+pub fn Byte2I(bts: &[u8]) -> i64 {
+    let mut rt = 0i64;
+    let mut i = bts.len();
+    for v in bts {
+        if i > 0 {
+            i -= 1;
+            rt |= (*v as i64) << (8 * i);
+        } else {
+            rt |= *v as i64;
+        }
+    }
+    rt
+}
+
+pub fn I2Byte(v: i64, n: usize) -> Box<[u8]> {
+    let mut rt: Vec<u8> = Vec::with_capacity(n);
+    // if n>4{return rt;}
+    for i in 0..n {
+        let k = n - i - 1;
+        if k > 0 {
+            rt.push((v >> (8 * k)) as u8);
+        } else {
+            rt.push(v as u8)
+        }
+    }
+    rt.into_boxed_slice()
+}
+
+pub fn tcp_read(ctx: &Context, stream: &mut net::TcpStream, ln: usize) -> io::Result<Box<[u8]>> {
+    if ln <= 0 {
+        return Ok(Box::new([0u8; 0]));
+    }
+    let mut rn = 0usize;
+    let mut data = vec![0u8; ln];
+    while rn < ln {
+        if ctx.done() {
+            return Err(io::Error::new(io::ErrorKind::Other, "ctx end!"));
+        }
+        match stream.read(&mut data[rn..]) {
+            Ok(n) => {
+                if n > 0 {
+                    rn += n;
+                } else {
+                    // let bts=&data[..];
+                    // println!("read errs:ln:{},rn:{},n:{}，dataln:{}，bts:{}",ln,rn,n,data.len(),bts.len());
+                    return Err(io::Error::new(io::ErrorKind::Other, "read err!"));
+                }
+            }
+            Err(e) => return Err(e),
+        }
+    }
+    Ok(data.into_boxed_slice())
+}
+pub fn tcp_write(ctx: &Context, stream: &mut net::TcpStream, bts: &[u8]) -> io::Result<usize> {
+    if bts.len() <= 0 {
+        return Ok(0);
+    }
+    if ctx.done() {
+        return Err(io::Error::new(io::ErrorKind::Other, "ctx end!"));
+    }
+    match stream.write(bts) {
+        Err(e) => Err(e),
+        Ok(n) => {
+            if n != bts.len() {
+                Err(io::Error::new(
+                    io::ErrorKind::Other,
+                    format!("send len err:{}/{}", n, bts.len()),
+                ))
+            } else {
+                Ok(n)
+            }
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct Context {
+    inner: Arc<CtxInner>,
+}
+struct CtxInner {
+    parent: Option<Context>,
+    doned: Mutex<bool>,
+
+    times: time::SystemTime,
+    timeout: Mutex<Option<time::Duration>>,
+}
+
+impl Context {
+    pub fn background(prt: Option<Context>) -> Self {
+        Self {
+            inner: Arc::new(CtxInner {
+                parent: prt,
+                doned: Mutex::new(false),
+                times: time::SystemTime::now(),
+                timeout: Mutex::new(None),
+            }),
+        }
+    }
+
+    pub fn with_timeout(prt: Option<Context>, tmd: time::Duration) -> Self {
+        let mut c = Self::background(prt);
+        if let Ok(mut v) = c.inner.timeout.lock() {
+            *v = Some(tmd)
+        }
+        c
+    }
+
+    pub fn done(&self) -> bool {
+        if let Some(v) = &self.inner.parent {
+            if v.done() {
+                return true;
+            }
+        };
+        if let Some(v) = &*self.inner.timeout.lock().unwrap() {
+            if let Ok(vs) = time::SystemTime::now().duration_since(self.inner.times) {
+                if vs.gt(v) {
+                    return true;
+                }
+            }
+        }
+        *self.inner.doned.lock().unwrap()
+    }
+
+    pub fn stop(&self) -> bool {
+        match self.inner.doned.lock() {
+            Err(e) => false,
+            Ok(mut v) => {
+                *v = true;
+                true
+            }
+        }
+    }
+}
+
+pub struct WaitGroup {
+    inner: Arc<WgInner>,
+}
+
+/// Inner state of a `WaitGroup`.
+struct WgInner {
+    cvar: Condvar,
+    count: Mutex<usize>,
+}
+impl WaitGroup {
+    pub fn new() -> Self {
+        Self {
+            inner: Arc::new(WgInner {
+                cvar: Condvar::new(),
+                count: Mutex::new(1),
+            }),
+        }
+    }
+    pub fn wait(self) {
+        if *self.inner.count.lock().unwrap() == 1 {
+            return;
+        }
+
+        let inner = self.inner.clone();
+        drop(self);
+
+        let mut count = inner.count.lock().unwrap();
+        while *count > 0 {
+            count = inner.cvar.wait(count).unwrap();
+        }
+    }
+}
+impl Drop for WaitGroup {
+    fn drop(&mut self) {
+        let mut count = self.inner.count.lock().unwrap();
+        *count -= 1;
+
+        if *count == 0 {
+            self.inner.cvar.notify_all();
+        }
+    }
+}
+
+impl Clone for WaitGroup {
+    fn clone(&self) -> WaitGroup {
+        let mut count = self.inner.count.lock().unwrap();
+        *count += 1;
+
+        WaitGroup {
+            inner: self.inner.clone(),
+        }
+    }
+}
