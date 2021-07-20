@@ -33,6 +33,30 @@ pub fn I2Byte(v: i64, n: usize) -> Box<[u8]> {
     rt.into_boxed_slice()
 }
 
+pub fn ioerrs(s: &str, kd: Option<io::ErrorKind>) -> io::Error {
+    let mut kds = io::ErrorKind::Other;
+    if let Some(v) = kd {
+        kds = v;
+    }
+    io::Error::new(kds, s)
+}
+pub fn struct2byte<T: Sized>(p: &T) -> &[u8] {
+    unsafe { std::slice::from_raw_parts((p as *const T) as *const u8, std::mem::size_of::<T>()) }
+}
+pub fn byte2struct<T: Sized>(p: &mut T, bts: &[u8]) -> io::Result<()> {
+    let ln = std::mem::size_of::<T>();
+    if ln != bts.len() {
+        return Err(ioerrs("param err!", None));
+    }
+
+    unsafe {
+        let ptr = p as *mut T;
+        let tb = bts.as_ptr() as *const T;
+        std::ptr::copy_nonoverlapping(tb, ptr, ln);
+    };
+    Ok(())
+}
+
 pub fn tcp_read(ctx: &Context, stream: &mut net::TcpStream, ln: usize) -> io::Result<Box<[u8]>> {
     if ln <= 0 {
         return Ok(Box::new([0u8; 0]));
@@ -157,17 +181,17 @@ impl WaitGroup {
             }),
         }
     }
-    pub fn wait(self) {
-        if *self.inner.count.lock().unwrap() == 1 {
+    pub fn wait(&self) {
+        /* if *self.inner.count.lock().unwrap() == 1 {
             return;
         }
 
         let inner = self.inner.clone();
-        drop(self);
+        drop(self); */
 
-        let mut count = inner.count.lock().unwrap();
-        while *count > 0 {
-            count = inner.cvar.wait(count).unwrap();
+        let mut count = self.inner.count.lock().unwrap();
+        while *count > 1 {
+            count = self.inner.cvar.wait(count).unwrap();
         }
     }
 }
