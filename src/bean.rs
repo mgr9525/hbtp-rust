@@ -26,9 +26,9 @@ pub struct ResInfoV1 {
     pub lenBody: u32,
 }
 impl ResInfoV1 {
-    pub fn new(code: i32) -> Self {
+    pub fn new() -> Self {
         Self {
-            code: code,
+            code: 0,
             lenHead: 0,
             lenBody: 0,
         }

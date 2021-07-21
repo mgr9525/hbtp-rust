@@ -4,7 +4,7 @@ use std::{
     borrow::Cow,
     collections::{HashMap, LinkedList},
     io, mem,
-    net::{TcpListener, TcpStream},
+    net::{TcpListener, TcpStream, ToSocketAddrs},
     ptr, thread,
     time::{Duration, SystemTime},
     usize,
@@ -17,7 +17,7 @@ pub mod util;
 mod tests {
     use std::{mem, thread};
 
-    use crate::{bean, util, Engine};
+    use crate::{bean, util, Engine, Request};
 
     #[test]
     fn it_works() {
@@ -75,7 +75,28 @@ mod tests {
         serv.run();
     }
     fn testFun(c: &mut crate::Context) {
-        println!("teestFun ctrl:{}", c.control())
+        println!(
+            "testFun ctrl:{},ishell:{}",
+            c.control(),
+            c.command() == "hello"
+        );
+        if let Err(e) = c.res_string(crate::ResCodeOk, "hello,there is rust!!") {
+            println!("testFun res_string err:{}", e)
+        };
+    }
+    #[test]
+    fn hbtp_request() {
+        let mut req = Request::new("localhost:7030", 1);
+        req.command("hello");
+        match req.do_string(None, "dedededede") {
+            Err(e) => println!("do err:{}", e),
+            Ok(res) => {
+                println!("res code:{}", res.get_code());
+                if let Some(bs) = res.bodys {
+                    println!("res data:{}", std::str::from_utf8(&bs[..]).unwrap())
+                }
+            }
+        };
     }
 }
 type ConnFun = fn(res: &mut Context);
@@ -84,6 +105,10 @@ pub const ResCodeOk: i32 = 1;
 pub const ResCodeErr: i32 = 2;
 pub const ResCodeAuth: i32 = 3;
 pub const ResCodeNotFound: i32 = 4;
+
+const MaxOther: u64 = 1024 * 1024 * 20; //20M
+const MaxHeads: u64 = 1024 * 1024 * 100; //100M
+const MaxBodys: u64 = 1024 * 1024 * 1024; //1G
 
 // #[macro_export]
 /* #[proc_macro_attribute]
@@ -173,8 +198,16 @@ impl Engine {
         if info.version != 1 {
             return Err(util::ioerrs("not found version!", None));
         }
+        if (info.lenCmd + info.lenArg) as u64 > MaxOther {
+            return Err(util::ioerrs("bytes1 out limit!!", None));
+        }
+        if (info.lenHead) as u64 > MaxHeads {
+            return Err(util::ioerrs("bytes2 out limit!!", None));
+        }
+        if (info.lenBody) as u64 > MaxBodys {
+            return Err(util::ioerrs("bytes3 out limit!!", None));
+        }
         let mut rt = Context::new(info.control);
-        let ctx = util::Context::with_timeout(Some(self.ctx.clone()), Duration::from_secs(30));
         let lnsz = info.lenCmd as usize;
         if lnsz > 0 {
             let bts = util::tcp_read(&ctx, conn, lnsz)?;
@@ -191,13 +224,13 @@ impl Engine {
                 Ok(v) => String::from(v),
             };
         }
-        let ctx = util::Context::with_timeout(Some(self.ctx.clone()), Duration::from_secs(50));
+        let ctx = util::Context::with_timeout(Some(self.ctx.clone()), Duration::from_secs(30));
         let lnsz = info.lenHead as usize;
         if lnsz > 0 {
             let bts = util::tcp_read(&ctx, conn, lnsz as usize)?;
             rt.heads = Some(bts);
         }
-        let ctx = util::Context::with_timeout(Some(self.ctx.clone()), Duration::from_secs(100));
+        let ctx = util::Context::with_timeout(Some(self.ctx.clone()), Duration::from_secs(50));
         let lnsz = info.lenBody as usize;
         if lnsz > 0 {
             let bts = util::tcp_read(&ctx, conn, lnsz as usize)?;
@@ -239,10 +272,16 @@ impl Context {
         }
     }
     pub fn get_conn(&self) -> &TcpStream {
-        match &self.conn {
-            Some(v) => v,
-            None => panic!("not found conn!logic err"),
+        if let Some(v) = &self.conn {
+            return v;
         }
+        panic!("conn?");
+    }
+    pub fn own_conn(&mut self) -> TcpStream {
+        if let Some(v) = std::mem::replace(&mut self.conn, None) {
+            return v;
+        }
+        panic!("conn?");
     }
     pub fn control(&self) -> i32 {
         self.ctrl
@@ -277,7 +316,8 @@ impl Context {
             return Err(util::ioerrs("already responsed!", None));
         }
         self.sended = true;
-        let mut res = bean::ResInfoV1::new(code);
+        let mut res = bean::ResInfoV1::new();
+        res.code = code;
         if let Some(v) = hds {
             res.lenHead = v.len() as u32;
         }
@@ -312,14 +352,9 @@ pub struct Request {
     addr: String,
     conn: Option<TcpStream>,
     ctrl: i32,
-    cmds: Option<String>,
-    args: Option<String>,
+    cmds: String,
+    args: String,
 
-    code: i32,
-    heads: Option<Box<[u8]>>,
-    bodys: Option<Box<[u8]>>,
-
-    started: SystemTime,
     tmout: Duration,
 }
 impl Request {
@@ -330,19 +365,166 @@ impl Request {
             addr: String::from(addr),
             conn: None,
             ctrl: control,
-            cmds: None,
-            args: None,
+            cmds: String::new(),
+            args: String::new(),
 
+            tmout: Duration::from_secs(30),
+        }
+    }
+    pub fn newcmd(addr: &str, control: i32, s: &str) -> Self {
+        let mut c = Self::new(addr, control);
+        c.command(s);
+        c
+    }
+    pub fn timeout(&mut self, ts: Duration) {
+        self.tmout = ts;
+    }
+    pub fn command(&mut self, s: &str) {
+        self.cmds = String::from(s);
+    }
+    pub fn set_args(&mut self, s: &str) {
+        self.args = String::from(s);
+    }
+    fn connect(&mut self) -> io::Result<TcpStream> {
+        match self.addr.as_str().to_socket_addrs() {
+            Err(e) => return Err(util::ioerrs(format!("parse:{}", e).as_str(), None)),
+            Ok(mut v) => loop {
+                if let Some(sa) = v.next() {
+                    println!("getip:{}", sa);
+                    if let Ok(conn) = TcpStream::connect_timeout(&sa, self.tmout.clone()) {
+                        return Ok(conn);
+                    }
+                } else {
+                    break;
+                }
+            },
+        };
+        Err(util::ioerrs("not found ip", None))
+    }
+    fn send(&mut self, hds: Option<&[u8]>, bds: Option<&[u8]>) -> io::Result<TcpStream> {
+        let mut conn = self.connect()?; //TcpStream::connect_timeout(&addr, self.tmout.clone())?;
+        if self.sended {
+            return Err(util::ioerrs("already request!", None));
+        }
+        self.sended = true;
+        let mut reqs = bean::MsgInfo::new();
+        reqs.version = 1;
+        reqs.control = self.ctrl;
+        reqs.lenCmd = self.cmds.len() as u16;
+        reqs.lenArg = self.args.len() as u16;
+        if let Some(v) = hds {
+            reqs.lenHead = v.len() as u32;
+        }
+        if let Some(v) = bds {
+            reqs.lenBody = v.len() as u32;
+        }
+        let bts = util::struct2byte(&reqs);
+        let ctx = util::Context::with_timeout(self.ctx.clone(), Duration::from_secs(10));
+        util::tcp_write(&ctx, &mut conn, bts)?;
+        if reqs.lenCmd > 0 {
+            let bts = self.cmds.as_bytes();
+            util::tcp_write(&ctx, &mut conn, bts)?;
+        }
+        if reqs.lenArg > 0 {
+            let bts = self.args.as_bytes();
+            util::tcp_write(&ctx, &mut conn, bts)?;
+        }
+        if let Some(v) = hds {
+            let ctx = util::Context::with_timeout(self.ctx.clone(), Duration::from_secs(30));
+            util::tcp_write(&ctx, &mut conn, v)?;
+        }
+        if let Some(v) = bds {
+            let ctx = util::Context::with_timeout(self.ctx.clone(), Duration::from_secs(50));
+            util::tcp_write(&ctx, &mut conn, v)?;
+        }
+        Ok(conn)
+    }
+    fn response(&self, mut conn: TcpStream) -> io::Result<Response> {
+        let mut info = bean::ResInfoV1::new();
+        let infoln = mem::size_of::<bean::ResInfoV1>();
+        let ctx = util::Context::with_timeout(self.ctx.clone(), Duration::from_secs(10));
+        let bts = util::tcp_read(&ctx, &mut conn, infoln)?;
+        util::byte2struct(&mut info, &bts[..])?;
+        if (info.lenHead) as u64 > MaxHeads {
+            return Err(util::ioerrs("bytes2 out limit!!", None));
+        }
+        if (info.lenBody) as u64 > MaxBodys {
+            return Err(util::ioerrs("bytes3 out limit!!", None));
+        }
+        let mut rt = Response::new();
+        rt.code = info.code;
+        let ctx = util::Context::with_timeout(self.ctx.clone(), Duration::from_secs(30));
+        let lnsz = info.lenHead as usize;
+        if lnsz > 0 {
+            let bts = util::tcp_read(&ctx, &mut conn, lnsz as usize)?;
+            rt.heads = Some(bts);
+        }
+        let ctx = util::Context::with_timeout(self.ctx.clone(), Duration::from_secs(50));
+        let lnsz = info.lenBody as usize;
+        if lnsz > 0 {
+            let bts = util::tcp_read(&ctx, &mut conn, lnsz as usize)?;
+            rt.bodys = Some(bts);
+        }
+        Ok(rt)
+    }
+    pub fn dors(&mut self, hds: Option<&[u8]>, bds: Option<&[u8]>) -> io::Result<Response> {
+        let conn = self.send(hds, bds)?;
+        self.response(conn)
+    }
+    pub fn donrs(&mut self, hds: Option<&[u8]>, bds: Option<&[u8]>) -> io::Result<()> {
+        let conn = self.send(hds, bds)?;
+        self.conn = Some(conn);
+        Ok(())
+    }
+    pub fn res(&mut self) -> io::Result<Response> {
+        if let Some(v) = std::mem::replace(&mut self.conn, None) {
+            return self.response(v);
+        }
+        Err(util::ioerrs("send?", None))
+    }
+    pub fn do_bytes(&mut self, hds: Option<&[u8]>, bds: &[u8]) -> io::Result<Response> {
+        self.dors(hds, Some(bds))
+    }
+    pub fn do_string(&mut self, hds: Option<&[u8]>, s: &str) -> io::Result<Response> {
+        self.do_bytes(hds, s.as_bytes())
+    }
+}
+
+pub struct Response {
+    conn: Option<TcpStream>,
+
+    code: i32,
+    heads: Option<Box<[u8]>>,
+    bodys: Option<Box<[u8]>>,
+}
+impl Response {
+    fn new() -> Self {
+        Self {
+            conn: None,
             code: 0,
             heads: None,
             bodys: None,
-
-            started: SystemTime::UNIX_EPOCH,
-            tmout: Duration::from_secs(120),
         }
     }
-    pub fn timeout(mut self, ts: Duration) -> Self {
-        self.tmout = ts;
-        self
+    pub fn get_conn(&self) -> &TcpStream {
+        if let Some(v) = &self.conn {
+            return v;
+        }
+        panic!("conn?");
+    }
+    pub fn own_conn(&mut self) -> TcpStream {
+        if let Some(v) = std::mem::replace(&mut self.conn, None) {
+            return v;
+        }
+        panic!("conn?");
+    }
+    pub fn get_code(&self) -> i32 {
+        self.code
+    }
+    pub fn get_heads(&self) -> &Option<Box<[u8]>> {
+        &self.heads
+    }
+    pub fn get_bodys(&self) -> &Option<Box<[u8]>> {
+        &self.bodys
     }
 }
