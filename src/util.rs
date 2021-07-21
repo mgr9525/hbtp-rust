@@ -2,7 +2,8 @@ use std::{
     io::{self, Read, Write},
     net,
     sync::{Arc, Condvar, Mutex},
-    time,
+    thread,
+    time::{self, Duration},
 };
 
 pub fn Byte2I(bts: &[u8]) -> i64 {
@@ -50,8 +51,8 @@ pub fn byte2struct<T: Sized>(p: &mut T, bts: &[u8]) -> io::Result<()> {
     }
 
     unsafe {
-        let ptr = p as *mut T;
-        let tb = bts.as_ptr() as *const T;
+        let ptr = p as *mut T as *mut u8;
+        let tb = bts.as_ptr();
         std::ptr::copy_nonoverlapping(tb, ptr, ln);
     };
     Ok(())
@@ -169,47 +170,39 @@ pub struct WaitGroup {
 
 /// Inner state of a `WaitGroup`.
 struct WgInner {
-    cvar: Condvar,
     count: Mutex<usize>,
 }
 impl WaitGroup {
     pub fn new() -> Self {
         Self {
             inner: Arc::new(WgInner {
-                cvar: Condvar::new(),
                 count: Mutex::new(1),
             }),
         }
     }
     pub fn wait(&self) {
-        /* if *self.inner.count.lock().unwrap() == 1 {
-            return;
-        }
-
-        let inner = self.inner.clone();
-        drop(self); */
-
-        let mut count = self.inner.count.lock().unwrap();
-        while *count > 1 {
-            count = self.inner.cvar.wait(count).unwrap();
+        loop {
+            thread::sleep(Duration::from_millis(1));
+            let mut count = self.inner.count.lock().unwrap();
+            if *count <= 1 {
+                break;
+            }
         }
     }
 }
 impl Drop for WaitGroup {
     fn drop(&mut self) {
-        let mut count = self.inner.count.lock().unwrap();
-        *count -= 1;
-
-        if *count == 0 {
-            self.inner.cvar.notify_all();
+        if let Ok(mut v) = self.inner.count.lock() {
+            *v -= 1;
         }
     }
 }
 
 impl Clone for WaitGroup {
     fn clone(&self) -> WaitGroup {
-        let mut count = self.inner.count.lock().unwrap();
-        *count += 1;
+        if let Ok(mut v) = self.inner.count.lock() {
+            *v += 1;
+        }
 
         WaitGroup {
             inner: self.inner.clone(),
