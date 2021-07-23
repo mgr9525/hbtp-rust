@@ -157,6 +157,10 @@ impl Engine {
         // thread::spawn(move || unsafe { &mut *(ptr as *mut Self) }.run());
         return Ok(this);
     }
+    pub fn stop(&mut self) {
+        self.lsr = None;
+        self.ctx.stop();
+    }
     pub fn run(&self) -> io::Result<()> {
         while !self.ctx.done() {
             if let Some(lsr) = &self.lsr {
