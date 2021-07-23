@@ -9,3 +9,4 @@ version = "0.1.0"
 # [lib]
 # proc-macro = true
 [dependencies]
+qstring = "0.7.2"

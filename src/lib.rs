@@ -1,4 +1,5 @@
 // extern crate proc_macro;
+extern crate qstring;
 
 use std::{
     borrow::Cow,
@@ -10,16 +11,19 @@ use std::{
     usize,
 };
 
-pub mod bean;
+use qstring::QString;
+
 pub mod util;
 
 #[cfg(test)]
 mod tests {
     use std::{mem, thread};
 
-    use crate::{bean, util, Engine, Request};
+    use qstring::QString;
 
-    #[test]
+    use crate::{util, Engine, Request};
+
+    /* #[test]
     fn it_works() {
         println!("hello test");
         let ctx1 = util::Context::background(None);
@@ -31,12 +35,12 @@ mod tests {
         let wg = util::WaitGroup::new();
         let wg1 = wg.clone();
         thread::spawn(move || {
-            let mut info = bean::MsgInfo::new();
+            let mut info = MsgInfo::new();
             info.version = 1;
             info.control = 2;
             info.lenCmd = 1000;
             let bts = util::struct2byte(&info);
-            let ln = std::mem::size_of::<bean::MsgInfo>();
+            let ln = std::mem::size_of::<MsgInfo>();
             println!(
                 "MsgInfo info.v:{},bts({}/{}):{:?}",
                 info.version,
@@ -44,7 +48,7 @@ mod tests {
                 ln,
                 bts
             );
-            let mut infos = bean::MsgInfo::new();
+            let mut infos = MsgInfo::new();
             if let Ok(()) = util::byte2struct(&mut infos, bts) {
                 println!(
                     "MsgInfos infos.v:{},ctrl:{},cmdln:{}",
@@ -59,7 +63,7 @@ mod tests {
         wg.wait();
         println!("start wg.wait end!!!!!");
         thread::sleep_ms(500);
-    }
+    } */
 
     #[test]
     fn hbtp_server() {
@@ -76,9 +80,11 @@ mod tests {
     }
     fn testFun(c: &mut crate::Context) {
         println!(
-            "testFun ctrl:{},ishell:{}",
+            "testFun ctrl:{},cmd:{},ishell:{},arg hello1:{}",
             c.control(),
-            c.command() == "hello"
+            c.command(),
+            c.command() == "hello",
+            c.get_arg("hehe1").unwrap().as_str()
         );
         if let Err(e) = c.res_string(crate::ResCodeOk, "hello,there is rust!!") {
             println!("testFun res_string err:{}", e)
@@ -88,6 +94,7 @@ mod tests {
     fn hbtp_request() {
         let mut req = Request::new("localhost:7030", 1);
         req.command("hello");
+        req.add_arg("hehe1", "123456789");
         match req.do_string(None, "dedededede") {
             Err(e) => println!("do err:{}", e),
             Ok(res) => {
@@ -97,6 +104,13 @@ mod tests {
                 }
             }
         };
+    }
+    #[test]
+    fn qstring_test() {
+        let mut qs = QString::from("foo=bar");
+        qs.add_pair(("haha", "hehe"));
+        let val = qs.get("foo").unwrap();
+        println!("val:{},s:{}", val, qs.to_string());
     }
 }
 type ConnFun = fn(res: &mut Context);
@@ -190,8 +204,8 @@ impl Engine {
     }
 
     fn ParseContext(&self, conn: &mut TcpStream) -> io::Result<Context> {
-        let mut info = bean::MsgInfo::new();
-        let infoln = mem::size_of::<bean::MsgInfo>();
+        let mut info = MsgInfo::new();
+        let infoln = mem::size_of::<MsgInfo>();
         let ctx = util::Context::with_timeout(Some(self.ctx.clone()), Duration::from_secs(10));
         let bts = util::tcp_read(&ctx, conn, infoln)?;
         util::byte2struct(&mut info, &bts[..])?;
@@ -219,10 +233,11 @@ impl Engine {
         let lnsz = info.lenArg as usize;
         if lnsz > 0 {
             let bts = util::tcp_read(&ctx, conn, lnsz as usize)?;
-            rt.args = match std::str::from_utf8(&bts[..]) {
+            let args = match std::str::from_utf8(&bts[..]) {
                 Err(e) => return Err(util::ioerrs("args err", None)),
                 Ok(v) => String::from(v),
             };
+            rt.args = Some(QString::from(args.as_str()));
         }
         let ctx = util::Context::with_timeout(Some(self.ctx.clone()), Duration::from_secs(30));
         let lnsz = info.lenHead as usize;
@@ -255,7 +270,7 @@ pub struct Context {
     conn: Option<TcpStream>,
     ctrl: i32,
     cmds: String,
-    args: String,
+    args: Option<QString>,
     heads: Option<Box<[u8]>>,
     bodys: Option<Box<[u8]>>,
 }
@@ -266,7 +281,7 @@ impl Context {
             conn: None,
             ctrl: control,
             cmds: String::new(),
-            args: String::new(),
+            args: None,
             heads: None,
             bodys: None,
         }
@@ -289,8 +304,36 @@ impl Context {
     pub fn command(&self) -> &str {
         self.cmds.as_str()
     }
-    pub fn get_args(&self) -> String {
-        self.args.clone()
+    pub fn get_args<'a>(&'a self) -> Option<&'a QString> {
+        if let Some(v) = &self.args {
+            Some(v)
+        } else {
+            None
+        }
+    }
+    pub fn get_arg(&self, name: &str) -> Option<String> {
+        if let Some(v) = &self.args {
+            if let Some(s) = v.get(name) {
+                Some(String::from(s))
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    }
+    /* pub fn set_arg(&mut self, name: &str, value: &str) {
+        if let None = &self.args {
+            self.args = Some(QString::from(""));
+        }
+        self.args.unwrap().add_str(origin)
+    } */
+    pub fn add_arg(&mut self, name: &str, value: &str) {
+        if let Some(v) = &mut self.args {
+            v.add_pair((name, value));
+        } else {
+            self.args = Some(QString::new(vec![(name, value)]));
+        }
     }
     pub fn get_heads(&self) -> &Option<Box<[u8]>> {
         &self.heads
@@ -316,7 +359,7 @@ impl Context {
             return Err(util::ioerrs("already responsed!", None));
         }
         self.sended = true;
-        let mut res = bean::ResInfoV1::new();
+        let mut res = ResInfoV1::new();
         res.code = code;
         if let Some(v) = hds {
             res.lenHead = v.len() as u32;
@@ -353,7 +396,7 @@ pub struct Request {
     conn: Option<TcpStream>,
     ctrl: i32,
     cmds: String,
-    args: String,
+    args: Option<QString>,
 
     tmout: Duration,
 }
@@ -366,7 +409,7 @@ impl Request {
             conn: None,
             ctrl: control,
             cmds: String::new(),
-            args: String::new(),
+            args: None,
 
             tmout: Duration::from_secs(30),
         }
@@ -382,8 +425,36 @@ impl Request {
     pub fn command(&mut self, s: &str) {
         self.cmds = String::from(s);
     }
-    pub fn set_args(&mut self, s: &str) {
-        self.args = String::from(s);
+    pub fn get_args<'a>(&'a self) -> Option<&'a QString> {
+        if let Some(v) = &self.args {
+            Some(v)
+        } else {
+            None
+        }
+    }
+    pub fn get_arg(&self, name: &str) -> Option<String> {
+        if let Some(v) = &self.args {
+            if let Some(s) = v.get(name) {
+                Some(String::from(s))
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    }
+    /* pub fn set_arg(&mut self, name: &str, value: &str) {
+        if let None = &self.args {
+            self.args = Some(QString::from(""));
+        }
+        self.args.unwrap().add_str(origin)
+    } */
+    pub fn add_arg(&mut self, name: &str, value: &str) {
+        if let Some(v) = &mut self.args {
+            v.add_pair((name, value));
+        } else {
+            self.args = Some(QString::new(vec![(name, value)]));
+        }
     }
     fn connect(&mut self) -> io::Result<TcpStream> {
         match self.addr.as_str().to_socket_addrs() {
@@ -407,11 +478,15 @@ impl Request {
             return Err(util::ioerrs("already request!", None));
         }
         self.sended = true;
-        let mut reqs = bean::MsgInfo::new();
+        let mut args = String::new();
+        if let Some(v) = &self.args {
+            args = v.to_string();
+        }
+        let mut reqs = MsgInfo::new();
         reqs.version = 1;
         reqs.control = self.ctrl;
         reqs.lenCmd = self.cmds.len() as u16;
-        reqs.lenArg = self.args.len() as u16;
+        reqs.lenArg = args.len() as u16;
         if let Some(v) = hds {
             reqs.lenHead = v.len() as u32;
         }
@@ -426,7 +501,7 @@ impl Request {
             util::tcp_write(&ctx, &mut conn, bts)?;
         }
         if reqs.lenArg > 0 {
-            let bts = self.args.as_bytes();
+            let bts = args.as_bytes();
             util::tcp_write(&ctx, &mut conn, bts)?;
         }
         if let Some(v) = hds {
@@ -440,8 +515,8 @@ impl Request {
         Ok(conn)
     }
     fn response(&self, mut conn: TcpStream) -> io::Result<Response> {
-        let mut info = bean::ResInfoV1::new();
-        let infoln = mem::size_of::<bean::ResInfoV1>();
+        let mut info = ResInfoV1::new();
+        let infoln = mem::size_of::<ResInfoV1>();
         let ctx = util::Context::with_timeout(self.ctx.clone(), Duration::from_secs(10));
         let bts = util::tcp_read(&ctx, &mut conn, infoln)?;
         util::byte2struct(&mut info, &bts[..])?;
@@ -526,5 +601,43 @@ impl Response {
     }
     pub fn get_bodys(&self) -> &Option<Box<[u8]>> {
         &self.bodys
+    }
+}
+
+//----------------------------------bean
+#[repr(C, packed)]
+struct MsgInfo {
+    pub version: u16,
+    pub control: i32,
+    pub lenCmd: u16,
+    pub lenArg: u16,
+    pub lenHead: u32,
+    pub lenBody: u32,
+}
+impl MsgInfo {
+    pub fn new() -> Self {
+        Self {
+            version: 0,
+            control: 0,
+            lenCmd: 0,
+            lenArg: 0,
+            lenHead: 0,
+            lenBody: 0,
+        }
+    }
+}
+#[repr(C, packed)]
+struct ResInfoV1 {
+    pub code: i32,
+    pub lenHead: u32,
+    pub lenBody: u32,
+}
+impl ResInfoV1 {
+    pub fn new() -> Self {
+        Self {
+            code: 0,
+            lenHead: 0,
+            lenBody: 0,
+        }
     }
 }
