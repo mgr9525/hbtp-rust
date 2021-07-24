@@ -558,6 +558,7 @@ impl Request {
             let bts = util::tcp_read(&ctx, &mut conn, lnsz as usize)?;
             rt.bodys = Some(bts);
         }
+        rt.conn = Some(conn);
         Ok(rt)
     }
     pub fn dors(&mut self, hds: Option<&[u8]>, bds: Option<&[u8]>) -> io::Result<Response> {
