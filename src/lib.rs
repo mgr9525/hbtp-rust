@@ -86,6 +86,7 @@ mod tests {
             c.command() == "hello",
             c.get_arg("hehe1").unwrap().as_str()
         );
+        panic!("whats?");
         if let Err(e) = c.res_string(crate::ResCodeOk, "hello,there is rust!!") {
             println!("testFun res_string err:{}", e)
         };
@@ -191,7 +192,15 @@ impl Engine {
                             break;
                         }
                         if let Some(f) = itr.next() {
-                            callfun(f, &mut res);
+                            // callfun(f, &mut res);
+                            let ptr = &mut res as *mut Context;
+                            let rst = std::panic::catch_unwind(move || {
+                                let ts = unsafe { (&mut *ptr) as &mut Context };
+                                f(ts);
+                            });
+                            if let Some(e) = rst.err() {
+                                println!("ctrl command fun err:{:?}", e);
+                            }
                         } else {
                             break;
                         }
