@@ -191,7 +191,7 @@ impl Engine {
                             break;
                         }
                         if let Some(f) = itr.next() {
-                            f(&mut res);
+                            callfun(f, &mut res);
                         } else {
                             break;
                         }
@@ -267,6 +267,11 @@ impl Engine {
             self.fns.insert(control, v);
         }
     }
+}
+
+fn callfun(fun: &ConnFun, ctx: &mut Context) {
+    std::panic::catch_unwind(|| println!("callfun catch panic"));
+    fun(ctx);
 }
 
 pub struct Context {
