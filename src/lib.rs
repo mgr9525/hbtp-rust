@@ -2,6 +2,7 @@
 extern crate qstring;
 
 use std::{
+    any,
     borrow::Cow,
     collections::{HashMap, LinkedList},
     io, mem,
@@ -291,6 +292,8 @@ pub struct Context {
     args: Option<QString>,
     heads: Option<Box<[u8]>>,
     bodys: Option<Box<[u8]>>,
+
+    data: HashMap<String, Vec<u8>>,
 }
 impl Context {
     pub fn new(control: i32) -> Self {
@@ -302,7 +305,14 @@ impl Context {
             args: None,
             heads: None,
             bodys: None,
+            data: HashMap::new(),
         }
+    }
+    pub fn get_data(&self, s: &str) -> Option<&Vec<u8>> {
+        self.data.get(&String::from(s))
+    }
+    pub fn put_data(&mut self, s: &str, v: Vec<u8>) {
+        self.data.insert(String::from(s), v);
     }
     pub fn get_conn(&self) -> &TcpStream {
         if let Some(v) = &self.conn {
