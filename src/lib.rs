@@ -179,7 +179,7 @@ impl Engine {
         Ok(())
     }
     fn run_cli(&self, mut conn: TcpStream) {
-        match self.ParseContext(&mut conn) {
+        match ParseContext(&self.ctx,&mut conn) {
             Err(e) => println!("ParseContext err:{}", e),
             Ok(mut res) => {
                 res.conn = Some(conn);
@@ -209,57 +209,6 @@ impl Engine {
         }
     }
 
-    fn ParseContext(&self, conn: &mut TcpStream) -> io::Result<Context> {
-        let mut info = MsgInfo::new();
-        let infoln = mem::size_of::<MsgInfo>();
-        let ctx = util::Context::with_timeout(Some(self.ctx.clone()), Duration::from_secs(10));
-        let bts = util::tcp_read(&ctx, conn, infoln)?;
-        util::byte2struct(&mut info, &bts[..])?;
-        if info.version != 1 {
-            return Err(util::ioerrs("not found version!", None));
-        }
-        if (info.lenCmd + info.lenArg) as u64 > MaxOther {
-            return Err(util::ioerrs("bytes1 out limit!!", None));
-        }
-        if (info.lenHead) as u64 > MaxHeads {
-            return Err(util::ioerrs("bytes2 out limit!!", None));
-        }
-        if (info.lenBody) as u64 > MaxBodys {
-            return Err(util::ioerrs("bytes3 out limit!!", None));
-        }
-        let mut rt = Context::new(info.control);
-        let lnsz = info.lenCmd as usize;
-        if lnsz > 0 {
-            let bts = util::tcp_read(&ctx, conn, lnsz)?;
-            rt.cmds = match std::str::from_utf8(&bts[..]) {
-                Err(e) => return Err(util::ioerrs("cmd err", None)),
-                Ok(v) => String::from(v),
-            };
-        }
-        let lnsz = info.lenArg as usize;
-        if lnsz > 0 {
-            let bts = util::tcp_read(&ctx, conn, lnsz as usize)?;
-            let args = match std::str::from_utf8(&bts[..]) {
-                Err(e) => return Err(util::ioerrs("args err", None)),
-                Ok(v) => String::from(v),
-            };
-            rt.args = Some(QString::from(args.as_str()));
-        }
-        let ctx = util::Context::with_timeout(Some(self.ctx.clone()), Duration::from_secs(30));
-        let lnsz = info.lenHead as usize;
-        if lnsz > 0 {
-            let bts = util::tcp_read(&ctx, conn, lnsz as usize)?;
-            rt.heads = Some(bts);
-        }
-        let ctx = util::Context::with_timeout(Some(self.ctx.clone()), Duration::from_secs(50));
-        let lnsz = info.lenBody as usize;
-        if lnsz > 0 {
-            let bts = util::tcp_read(&ctx, conn, lnsz as usize)?;
-            rt.bodys = Some(bts);
-        }
-        Ok(rt)
-    }
-
     pub fn reg_fun(&mut self, control: i32, f: ConnFun) {
         if let Some(v) = self.fns.get_mut(&control) {
             v.push_back(f);
@@ -269,6 +218,57 @@ impl Engine {
             self.fns.insert(control, v);
         }
     }
+}
+
+fn ParseContext(ctx: &util::Context, conn: &mut TcpStream) -> io::Result<Context> {
+    let mut info = MsgInfo::new();
+    let infoln = mem::size_of::<MsgInfo>();
+    let ctx = util::Context::with_timeout(Some(ctx.clone()), Duration::from_secs(10));
+    let bts = util::tcp_read(&ctx, conn, infoln)?;
+    util::byte2struct(&mut info, &bts[..])?;
+    if info.version != 1 {
+        return Err(util::ioerrs("not found version!", None));
+    }
+    if (info.lenCmd + info.lenArg) as u64 > MaxOther {
+        return Err(util::ioerrs("bytes1 out limit!!", None));
+    }
+    if (info.lenHead) as u64 > MaxHeads {
+        return Err(util::ioerrs("bytes2 out limit!!", None));
+    }
+    if (info.lenBody) as u64 > MaxBodys {
+        return Err(util::ioerrs("bytes3 out limit!!", None));
+    }
+    let mut rt = Context::new(info.control);
+    let lnsz = info.lenCmd as usize;
+    if lnsz > 0 {
+        let bts = util::tcp_read(&ctx, conn, lnsz)?;
+        rt.cmds = match std::str::from_utf8(&bts[..]) {
+            Err(e) => return Err(util::ioerrs("cmd err", None)),
+            Ok(v) => String::from(v),
+        };
+    }
+    let lnsz = info.lenArg as usize;
+    if lnsz > 0 {
+        let bts = util::tcp_read(&ctx, conn, lnsz as usize)?;
+        let args = match std::str::from_utf8(&bts[..]) {
+            Err(e) => return Err(util::ioerrs("args err", None)),
+            Ok(v) => String::from(v),
+        };
+        rt.args = Some(QString::from(args.as_str()));
+    }
+    let ctx = util::Context::with_timeout(Some(ctx.clone()), Duration::from_secs(30));
+    let lnsz = info.lenHead as usize;
+    if lnsz > 0 {
+        let bts = util::tcp_read(&ctx, conn, lnsz as usize)?;
+        rt.heads = Some(bts);
+    }
+    let ctx = util::Context::with_timeout(Some(ctx.clone()), Duration::from_secs(50));
+    let lnsz = info.lenBody as usize;
+    if lnsz > 0 {
+        let bts = util::tcp_read(&ctx, conn, lnsz as usize)?;
+        rt.bodys = Some(bts);
+    }
+    Ok(rt)
 }
 
 pub struct Context {
