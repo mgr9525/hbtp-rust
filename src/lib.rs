@@ -189,7 +189,6 @@ impl Engine {
                         if res.is_sended() {
                             break;
                         }
-                        // callfun(f, &mut res);
                         let ptr = &mut res as *mut Context;
                         let rst = std::panic::catch_unwind(move || {
                             let ts = unsafe { (&mut *ptr) as &mut Context };
@@ -270,11 +269,6 @@ impl Engine {
             self.fns.insert(control, v);
         }
     }
-}
-
-fn callfun(fun: &ConnFun, ctx: &mut Context) {
-    std::panic::catch_unwind(|| println!("callfun catch panic"));
-    fun(ctx);
 }
 
 pub struct Context {
