@@ -6,7 +6,7 @@ use std::{
 
 use qstring::QString;
 
-use crate::{util, MaxBodys, MaxHeads, MsgInfo, ResInfoV1};
+use crate::{res::*, util};
 
 pub struct Request {
     ctx: Option<util::Context>,
