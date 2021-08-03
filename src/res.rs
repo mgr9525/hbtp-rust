@@ -145,6 +145,12 @@ impl Context {
     pub fn get_bodys(&self) -> &Option<Box<[u8]>> {
         &self.bodys
     }
+    pub fn own_heads(&mut self) -> Option<Box<[u8]>> {
+        std::mem::replace(&mut self.heads, None)
+    }
+    pub fn own_bodys(&mut self) -> Option<Box<[u8]>> {
+        std::mem::replace(&mut self.bodys, None)
+    }
     pub fn is_sended(&self) -> bool {
         self.sended
     }
