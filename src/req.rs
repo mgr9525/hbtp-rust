@@ -80,7 +80,7 @@ impl Request {
             Err(e) => return Err(util::ioerrs(format!("parse:{}", e).as_str(), None)),
             Ok(mut v) => loop {
                 if let Some(sa) = v.next() {
-                    println!("getip:{}", sa);
+                    // println!("connect to ip:{}", sa);
                     if let Ok(conn) = TcpStream::connect_timeout(&sa, self.tmout.clone()) {
                         return Ok(conn);
                     }
