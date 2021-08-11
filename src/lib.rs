@@ -1,5 +1,6 @@
 // extern crate proc_macro;
 extern crate qstring;
+extern crate ruisutil;
 
 use std::{
     any,
@@ -19,7 +20,6 @@ pub use res::Context;
 
 mod req;
 mod res;
-pub mod util;
 
 #[cfg(test)]
 mod tests {
@@ -27,25 +27,25 @@ mod tests {
 
     use qstring::QString;
 
-    use crate::{util, Engine, Request, Response};
+    use crate::{Engine, Request, Response};
 
     /* #[test]
     fn it_works() {
         println!("hello test");
-        let ctx1 = util::Context::background(None);
-        let ctx2 = util::Context::background(Some(ctx1.clone()));
+        let ctx1 = ruisutil::Context::background(None);
+        let ctx2 = ruisutil::Context::background(Some(ctx1.clone()));
         println!("start:ctx1:{},ctx2:{}", ctx1.done(), ctx2.done());
         ctx2.stop();
         println!("end:ctx1:{},ctx2:{}", ctx1.done(), ctx2.done());
 
-        let wg = util::WaitGroup::new();
+        let wg = ruisutil::WaitGroup::new();
         let wg1 = wg.clone();
         thread::spawn(move || {
             let mut info = MsgInfo::new();
             info.version = 1;
             info.control = 2;
             info.lenCmd = 1000;
-            let bts = util::struct2byte(&info);
+            let bts = ruisutil::struct2byte(&info);
             let ln = std::mem::size_of::<MsgInfo>();
             println!(
                 "MsgInfo info.v:{},bts({}/{}):{:?}",
@@ -55,7 +55,7 @@ mod tests {
                 bts
             );
             let mut infos = MsgInfo::new();
-            if let Ok(()) = util::byte2struct(&mut infos, bts) {
+            if let Ok(()) = ruisutil::byte2struct(&mut infos, bts) {
                 println!(
                     "MsgInfos infos.v:{},ctrl:{},cmdln:{}",
                     infos.version, infos.control, infos.lenCmd
@@ -131,7 +131,7 @@ pub fn controller(args: TokenStream, input: TokenStream) -> TokenStream {
 } */
 
 pub struct Engine {
-    ctx: util::Context,
+    ctx: ruisutil::Context,
     fns: HashMap<i32, LinkedList<ConnFun>>,
     addr: String,
     lsr: Option<TcpListener>,
@@ -144,9 +144,9 @@ impl Drop for Engine {
     }
 }
 impl Engine {
-    pub fn new(ctx: Option<util::Context>, addr: &str) -> Self {
+    pub fn new(ctx: Option<ruisutil::Context>, addr: &str) -> Self {
         Self {
-            ctx: util::Context::background(ctx),
+            ctx: ruisutil::Context::background(ctx),
             fns: HashMap::new(),
             addr: String::from(addr),
             lsr: None,
@@ -169,7 +169,7 @@ impl Engine {
                     Err(e) => {
                         println!("accept err:{}", e);
                         self.ctx.stop();
-                        return Err(util::ioerrs(e.to_string().as_str(), None));
+                        return Err(ruisutil::ioerr(e.to_string(), None));
                     }
                 }
             }

@@ -6,10 +6,10 @@ use std::{
 
 use qstring::QString;
 
-use crate::{res::*, util};
+use crate::res::*;
 
 pub struct Request {
-    ctx: Option<util::Context>,
+    ctx: Option<ruisutil::Context>,
     sended: bool,
     addr: String,
     conn: Option<TcpStream>,
@@ -77,7 +77,7 @@ impl Request {
     }
     fn connect(&mut self) -> io::Result<TcpStream> {
         match self.addr.as_str().to_socket_addrs() {
-            Err(e) => return Err(util::ioerrs(format!("parse:{}", e).as_str(), None)),
+            Err(e) => return Err(ruisutil::ioerr(format!("parse:{}", e), None)),
             Ok(mut v) => loop {
                 if let Some(sa) = v.next() {
                     // println!("connect to ip:{}", sa);
@@ -89,12 +89,12 @@ impl Request {
                 }
             },
         };
-        Err(util::ioerrs("not found ip", None))
+        Err(ruisutil::ioerr("not found ip", None))
     }
     fn send(&mut self, hds: Option<&[u8]>, bds: Option<&[u8]>) -> io::Result<TcpStream> {
         let mut conn = self.connect()?; //TcpStream::connect_timeout(&addr, self.tmout.clone())?;
         if self.sended {
-            return Err(util::ioerrs("already request!", None));
+            return Err(ruisutil::ioerr("already request!", None));
         }
         self.sended = true;
         let mut args = String::new();
@@ -112,51 +112,51 @@ impl Request {
         if let Some(v) = bds {
             reqs.lenBody = v.len() as u32;
         }
-        let bts = util::struct2byte(&reqs);
-        let ctx = util::Context::with_timeout(self.ctx.clone(), Duration::from_secs(10));
-        util::tcp_write(&ctx, &mut conn, bts)?;
+        let bts = ruisutil::struct2byte(&reqs);
+        let ctx = ruisutil::Context::with_timeout(self.ctx.clone(), Duration::from_secs(10));
+        ruisutil::tcp_write(&ctx, &mut conn, bts)?;
         if reqs.lenCmd > 0 {
             let bts = self.cmds.as_bytes();
-            util::tcp_write(&ctx, &mut conn, bts)?;
+            ruisutil::tcp_write(&ctx, &mut conn, bts)?;
         }
         if reqs.lenArg > 0 {
             let bts = args.as_bytes();
-            util::tcp_write(&ctx, &mut conn, bts)?;
+            ruisutil::tcp_write(&ctx, &mut conn, bts)?;
         }
         if let Some(v) = hds {
-            let ctx = util::Context::with_timeout(self.ctx.clone(), Duration::from_secs(30));
-            util::tcp_write(&ctx, &mut conn, v)?;
+            let ctx = ruisutil::Context::with_timeout(self.ctx.clone(), Duration::from_secs(30));
+            ruisutil::tcp_write(&ctx, &mut conn, v)?;
         }
         if let Some(v) = bds {
-            let ctx = util::Context::with_timeout(self.ctx.clone(), Duration::from_secs(50));
-            util::tcp_write(&ctx, &mut conn, v)?;
+            let ctx = ruisutil::Context::with_timeout(self.ctx.clone(), Duration::from_secs(50));
+            ruisutil::tcp_write(&ctx, &mut conn, v)?;
         }
         Ok(conn)
     }
     fn response(&self, mut conn: TcpStream) -> io::Result<Response> {
         let mut info = ResInfoV1::new();
         let infoln = mem::size_of::<ResInfoV1>();
-        let ctx = util::Context::with_timeout(self.ctx.clone(), Duration::from_secs(10));
-        let bts = util::tcp_read(&ctx, &mut conn, infoln)?;
-        util::byte2struct(&mut info, &bts[..])?;
+        let ctx = ruisutil::Context::with_timeout(self.ctx.clone(), Duration::from_secs(10));
+        let bts = ruisutil::tcp_read(&ctx, &mut conn, infoln)?;
+        ruisutil::byte2struct(&mut info, &bts[..])?;
         if (info.lenHead) as u64 > MaxHeads {
-            return Err(util::ioerrs("bytes2 out limit!!", None));
+            return Err(ruisutil::ioerr("bytes2 out limit!!", None));
         }
         if (info.lenBody) as u64 > MaxBodys {
-            return Err(util::ioerrs("bytes3 out limit!!", None));
+            return Err(ruisutil::ioerr("bytes3 out limit!!", None));
         }
         let mut rt = Response::new();
         rt.code = info.code;
-        let ctx = util::Context::with_timeout(self.ctx.clone(), Duration::from_secs(30));
+        let ctx = ruisutil::Context::with_timeout(self.ctx.clone(), Duration::from_secs(30));
         let lnsz = info.lenHead as usize;
         if lnsz > 0 {
-            let bts = util::tcp_read(&ctx, &mut conn, lnsz as usize)?;
+            let bts = ruisutil::tcp_read(&ctx, &mut conn, lnsz as usize)?;
             rt.heads = Some(bts);
         }
-        let ctx = util::Context::with_timeout(self.ctx.clone(), Duration::from_secs(50));
+        let ctx = ruisutil::Context::with_timeout(self.ctx.clone(), Duration::from_secs(50));
         let lnsz = info.lenBody as usize;
         if lnsz > 0 {
-            let bts = util::tcp_read(&ctx, &mut conn, lnsz as usize)?;
+            let bts = ruisutil::tcp_read(&ctx, &mut conn, lnsz as usize)?;
             rt.bodys = Some(bts);
         }
         rt.conn = Some(conn);
@@ -175,7 +175,7 @@ impl Request {
         if let Some(v) = std::mem::replace(&mut self.conn, None) {
             return self.response(v);
         }
-        Err(util::ioerrs("send?", None))
+        Err(ruisutil::ioerr("send?", None))
     }
     pub fn do_bytes(&mut self, hds: Option<&[u8]>, bds: &[u8]) -> io::Result<Response> {
         self.dors(hds, Some(bds))
