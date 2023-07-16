@@ -98,9 +98,9 @@ mod tests {
         req.add_arg("hehe1", "123456789");
         match req.do_string(None, "dedededede") {
             Err(e) => println!("do err:{}", e),
-            Ok(res) => {
+            Ok(mut res) => {
                 println!("res code:{}", res.get_code());
-                if let Some(bs) = res.get_bodys() {
+                if let Some(bs) = res.get_bodys(None) {
                     println!("res data:{}", std::str::from_utf8(&bs[..]).unwrap())
                 }
             }

@@ -15,17 +15,17 @@ pub fn ParseContext(ctx: &ruisutil::Context, mut conn: TcpStream) -> io::Result<
     if info.version != 1 {
         return Err(ruisutil::ioerr("not found version!", None));
     }
-    if (info.lenCmd + info.lenArg) as u64 > MaxOther {
+    if (info.len_cmd + info.len_arg) as u64 > MaxOther {
         return Err(ruisutil::ioerr("bytes1 out limit!!", None));
     }
-    if (info.lenHead) as u64 > MaxHeads {
+    if (info.len_head) as u64 > MaxHeads {
         return Err(ruisutil::ioerr("bytes2 out limit!!", None));
     }
-    if (info.lenBody) as u64 > MaxBodys {
+    if (info.len_body) as u64 > MaxBodys {
         return Err(ruisutil::ioerr("bytes3 out limit!!", None));
     }
     let mut rt = Context::new(info.control);
-    let lnsz = info.lenCmd as usize;
+    let lnsz = info.len_cmd as usize;
     if lnsz > 0 {
         let bts = ruisutil::tcp_read(&ctx, &mut conn, lnsz)?;
         rt.cmds = match std::str::from_utf8(&bts[..]) {
@@ -33,7 +33,7 @@ pub fn ParseContext(ctx: &ruisutil::Context, mut conn: TcpStream) -> io::Result<
             Ok(v) => String::from(v),
         };
     }
-    let lnsz = info.lenArg as usize;
+    let lnsz = info.len_arg as usize;
     if lnsz > 0 {
         let bts = ruisutil::tcp_read(&ctx, &mut conn, lnsz as usize)?;
         let args = match std::str::from_utf8(&bts[..]) {
@@ -43,13 +43,13 @@ pub fn ParseContext(ctx: &ruisutil::Context, mut conn: TcpStream) -> io::Result<
         rt.args = Some(QString::from(args.as_str()));
     }
     let ctx = ruisutil::Context::with_timeout(Some(ctx.clone()), Duration::from_secs(30));
-    let lnsz = info.lenHead as usize;
+    let lnsz = info.len_head as usize;
     if lnsz > 0 {
         let bts = ruisutil::tcp_read(&ctx, &mut conn, lnsz as usize)?;
         rt.heads = Some(bts);
     }
     let ctx = ruisutil::Context::with_timeout(Some(ctx.clone()), Duration::from_secs(50));
-    let lnsz = info.lenBody as usize;
+    let lnsz = info.len_body as usize;
     if lnsz > 0 {
         let bts = ruisutil::tcp_read(&ctx, &mut conn, lnsz as usize)?;
         rt.bodys = Some(bts);
@@ -170,10 +170,10 @@ impl Context {
         let mut res = ResInfoV1::new();
         res.code = code;
         if let Some(v) = hds {
-            res.lenHead = v.len() as u32;
+            res.len_head = v.len() as u32;
         }
         if let Some(v) = bds {
-            res.lenBody = v.len() as u32;
+            res.len_body = v.len() as u32;
         }
         let bts = ruisutil::struct2byte(&res);
         let ctx = ruisutil::Context::with_timeout(None, Duration::from_secs(10));
@@ -202,35 +202,67 @@ impl Context {
 pub struct MsgInfo {
     pub version: u16,
     pub control: i32,
-    pub lenCmd: u16,
-    pub lenArg: u16,
-    pub lenHead: u32,
-    pub lenBody: u32,
+    pub len_cmd: u16,
+    pub len_arg: u16,
+    pub len_head: u32,
+    pub len_body: u32,
 }
 impl MsgInfo {
     pub fn new() -> Self {
         Self {
             version: 0,
             control: 0,
-            lenCmd: 0,
-            lenArg: 0,
-            lenHead: 0,
-            lenBody: 0,
+            len_cmd: 0,
+            len_arg: 0,
+            len_head: 0,
+            len_body: 0,
         }
     }
 }
 #[repr(C, packed)]
 pub struct ResInfoV1 {
     pub code: i32,
-    pub lenHead: u32,
-    pub lenBody: u32,
+    pub len_head: u32,
+    pub len_body: u32,
 }
 impl ResInfoV1 {
     pub fn new() -> Self {
         Self {
             code: 0,
-            lenHead: 0,
-            lenBody: 0,
+            len_head: 0,
+            len_body: 0,
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct LmtMaxConfig {
+    pub max_ohther: u64,
+    pub max_heads: u64,
+}
+
+impl Default for LmtMaxConfig {
+    fn default() -> Self {
+        Self {
+            max_ohther: 1024 * 1024 * 2, //2M
+            max_heads: 1024 * 1024 * 10, //10M
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct LmtTmConfig {
+    pub tm_ohther: Duration,
+    pub tm_heads: Duration,
+    pub tm_bodys: Duration,
+}
+
+impl Default for LmtTmConfig {
+    fn default() -> Self {
+        Self {
+            tm_ohther: Duration::from_secs(10),
+            tm_heads: Duration::from_secs(30),
+            tm_bodys: Duration::from_secs(50),
         }
     }
 }
