@@ -9,6 +9,6 @@ version = "0.1.0"
 # [lib]
 # proc-macro = true
 [dependencies]
-qstring = "0.7.2"
+qstring = {git="https://github.com/mgr9525/qstring.git", rev="1523f04f0e1b50e0b20239035a3027add2140497"}
 # ruisutil = {git = "https://github.com/mgr9525/rust-ruisutil.git", rev = "8674fa5ff113e69cde3eb33daabdf583fc26e86e"}
 ruisutil={path="../rust-ruisutil"}

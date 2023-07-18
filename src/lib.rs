@@ -13,7 +13,7 @@ use std::{
     usize,
 };
 
-use qstring::QString;
+pub use qstring::QString;
 pub use req::Request;
 pub use req::Response;
 pub use res::Context;
