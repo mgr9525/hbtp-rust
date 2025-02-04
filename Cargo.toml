@@ -11,5 +11,5 @@ version = "0.1.0"
 [dependencies]
 qstring = {git="https://github.com/mgr9525/qstring.git", rev="1523f04f0e1b50e0b20239035a3027add2140497"}
 # ruisutil = {git = "https://github.com/mgr9525/rust-ruisutil.git", rev = "8674fa5ff113e69cde3eb33daabdf583fc26e86e"}
-ruisutil = {git = "https://github.com/mgr9525/rust-ruisutil.git", rev = "3973b392ae9520b519b7b15b16eccfa856a1ceac"}
+ruisutil = {git = "https://github.com/mgr9525/rust-ruisutil.git", rev = "93ff79ab294d3ac9dbccebdcf42a763f7978a400"}
 # ruisutil={path="../rust-ruisutil"}
